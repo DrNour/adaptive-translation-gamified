@@ -1,80 +1,98 @@
 import streamlit as st
-import sqlite3
-from db_utils import init_db, register_user, authenticate_user, create_task, submit_translation, get_leaderboard
+from db_utils import init_db, register_user, authenticate_user, create_task, get_tasks, submit_translation, get_leaderboard
 
-# Initialize the database
+# Initialize database
 init_db()
 
-# Login / Register form
-def login_register():
-    st.markdown("### Login or Register")
-    choice = st.radio("Choose:", ["Login", "Register"])
+# --- Login / Register ---
+def login_or_register():
+    st.sidebar.title("Login / Register")
+    action = st.sidebar.radio("Choose Action", ["Login", "Register"])
 
-    if choice == "Login":
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        role = st.selectbox("Role", ["Student", "Instructor"])
-        if st.button("Login"):
+    username = st.sidebar.text_input("Username")
+    password = st.sidebar.text_input("Password", type="password")
+    role = st.sidebar.selectbox("Role", ["Student", "Instructor"])
+
+    if action == "Register":
+        if st.sidebar.button("Register"):
+            success = register_user(username, password, role)
+            if success:
+                st.sidebar.success("Registration successful. Please login.")
+            else:
+                st.sidebar.error("Username already exists. Try again.")
+
+    elif action == "Login":
+        if st.sidebar.button("Login"):
             if authenticate_user(username, password, role):
-                st.session_state["username"] = username
-                st.session_state["role"] = role
-                st.success(f"Welcome {username} ({role})!")
+                st.session_state.logged_in = True
+                st.session_state.username = username
+                st.session_state.role = role
+                st.sidebar.success(f"Welcome {username} ({role})!")
             else:
-                st.error("Invalid credentials")
-    else:
-        new_username = st.text_input("New Username")
-        new_password = st.text_input("New Password", type="password")
-        new_role = st.selectbox("Role", ["Student", "Instructor"])
-        if st.button("Register"):
-            if register_user(new_username, new_password, new_role):
-                st.success("Registered successfully! Please log in.")
-            else:
-                st.error("Username already exists")
+                st.sidebar.error("Invalid credentials.")
 
-# Instructor dashboard
+# --- Instructor Dashboard ---
 def instructor_dashboard():
-    st.markdown("## Instructor Dashboard")
-    task_text = st.text_area("Enter translation task (English or Arabic)")
-    if st.button("Create Task"):
-        create_task(task_text)
-        st.success("Task created successfully!")
+    st.header("📚 Instructor Dashboard")
 
-# Student dashboard
-def student_dashboard():
-    st.markdown("## Student Dashboard")
+    st.subheader("➕ Create a New Task")
+    task_text = st.text_area("Enter source text for translation")
+    if st.button("Add Task"):
+        if task_text.strip():
+            create_task(task_text)
+            st.success("Task created successfully.")
+        else:
+            st.warning("Task cannot be empty.")
+
+    st.subheader("👀 Existing Tasks")
     tasks = get_tasks()
-    for task_id, task_text in tasks:
-        st.markdown(f"### Task {task_id}")
-        st.write(task_text)
-        student_translation = st.text_area(f"Your Translation for Task {task_id}", key=f"trans_{task_id}")
-        if st.button(f"Submit Task {task_id}"):
-            submit_translation(st.session_state["username"], task_id, student_translation)
-            st.success("Submitted! You earned points.")
-
-# Leaderboard
-def show_leaderboard():
-    st.markdown("## Leaderboard")
-    leaderboard = get_leaderboard()
-    for username, score in leaderboard:
-        st.write(f"{username}: {score} points")
-
-# App entry point
-def main():
-    st.title("Adaptive Translation Gamified App")
-
-    if "username" not in st.session_state:
-        login_register()
+    if tasks:
+        for task_id, text in tasks:
+            st.write(f"**Task {task_id}:** {text}")
     else:
-        role = st.session_state["role"]
-        if role == "Instructor":
+        st.info("No tasks available.")
+
+# --- Student Dashboard ---
+def student_dashboard():
+    st.header("🎓 Student Dashboard")
+
+    st.subheader("📝 Available Translation Tasks")
+    tasks = get_tasks()
+    if tasks:
+        for task_id, text in tasks:
+            st.markdown(f"**Task {task_id}:** {text}")
+            translation = st.text_area(f"Enter your translation for Task {task_id}", key=f"task_{task_id}")
+            if st.button(f"Submit for Task {task_id}", key=f"submit_{task_id}"):
+                if translation.strip():
+                    submit_translation(st.session_state.username, task_id, translation)
+                    st.success("Translation submitted successfully!")
+                else:
+                    st.warning("Translation cannot be empty.")
+    else:
+        st.info("No tasks available.")
+
+    st.subheader("🏆 Leaderboard")
+    leaderboard = get_leaderboard()
+    if leaderboard:
+        for i, (user, score) in enumerate(leaderboard, start=1):
+            st.write(f"{i}. {user} — {score} points")
+    else:
+        st.info("No submissions yet.")
+
+# --- Main App ---
+def main():
+    st.title("🌍 Gamified Translation Learning Platform")
+
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+
+    if not st.session_state.logged_in:
+        login_or_register()
+    else:
+        if st.session_state.role == "Instructor":
             instructor_dashboard()
-        elif role == "Student":
+        elif st.session_state.role == "Student":
             student_dashboard()
-
-        show_leaderboard()
-
-        if st.button("Logout"):
-            st.session_state.clear()
 
 if __name__ == "__main__":
     main()
