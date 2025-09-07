@@ -1,98 +1,122 @@
 import streamlit as st
-from db_utils import init_db, register_user, authenticate_user, create_task, get_tasks, submit_translation, get_leaderboard
+import sqlite3
 
-# Initialize database
-init_db()
+# --- Database setup ---
+def init_db():
+    conn = sqlite3.connect("users.db")
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY,
+            password TEXT,
+            role TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
-# --- Login / Register ---
-def login_or_register():
-    st.sidebar.title("Login / Register")
-    action = st.sidebar.radio("Choose Action", ["Login", "Register"])
+# --- User registration ---
+def register_user(username, password, role):
+    conn = sqlite3.connect("users.db")
+    c = conn.cursor()
+    try:
+        c.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", 
+                  (username, password, role))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
 
-    username = st.sidebar.text_input("Username")
-    password = st.sidebar.text_input("Password", type="password")
-    role = st.sidebar.selectbox("Role", ["Student", "Instructor"])
+# --- User login ---
+def login_user(username, password):
+    conn = sqlite3.connect("users.db")
+    c = conn.cursor()
+    c.execute("SELECT role FROM users WHERE username=? AND password=?", (username, password))
+    result = c.fetchone()
+    conn.close()
+    if result:
+        return result[0]
+    return None
 
-    if action == "Register":
-        if st.sidebar.button("Register"):
-            success = register_user(username, password, role)
-            if success:
-                st.sidebar.success("Registration successful. Please login.")
-            else:
-                st.sidebar.error("Username already exists. Try again.")
-
-    elif action == "Login":
-        if st.sidebar.button("Login"):
-            if authenticate_user(username, password, role):
-                st.session_state.logged_in = True
-                st.session_state.username = username
-                st.session_state.role = role
-                st.sidebar.success(f"Welcome {username} ({role})!")
-            else:
-                st.sidebar.error("Invalid credentials.")
-
-# --- Instructor Dashboard ---
-def instructor_dashboard():
-    st.header("📚 Instructor Dashboard")
-
-    st.subheader("➕ Create a New Task")
-    task_text = st.text_area("Enter source text for translation")
-    if st.button("Add Task"):
-        if task_text.strip():
-            create_task(task_text)
-            st.success("Task created successfully.")
-        else:
-            st.warning("Task cannot be empty.")
-
-    st.subheader("👀 Existing Tasks")
-    tasks = get_tasks()
-    if tasks:
-        for task_id, text in tasks:
-            st.write(f"**Task {task_id}:** {text}")
-    else:
-        st.info("No tasks available.")
-
-# --- Student Dashboard ---
+# --- Dashboards ---
 def student_dashboard():
-    st.header("🎓 Student Dashboard")
+    st.subheader("🎓 Student Dashboard")
+    st.write("Here you can practice translations, play games, and track progress.")
 
-    st.subheader("📝 Available Translation Tasks")
-    tasks = get_tasks()
-    if tasks:
-        for task_id, text in tasks:
-            st.markdown(f"**Task {task_id}:** {text}")
-            translation = st.text_area(f"Enter your translation for Task {task_id}", key=f"task_{task_id}")
-            if st.button(f"Submit for Task {task_id}", key=f"submit_{task_id}"):
-                if translation.strip():
-                    submit_translation(st.session_state.username, task_id, translation)
-                    st.success("Translation submitted successfully!")
-                else:
-                    st.warning("Translation cannot be empty.")
-    else:
-        st.info("No tasks available.")
+def instructor_dashboard():
+    st.subheader("👨‍🏫 Instructor Dashboard")
+    st.write("Here you can create tasks, review student work, and analyze performance.")
 
-    st.subheader("🏆 Leaderboard")
-    leaderboard = get_leaderboard()
-    if leaderboard:
-        for i, (user, score) in enumerate(leaderboard, start=1):
-            st.write(f"{i}. {user} — {score} points")
-    else:
-        st.info("No submissions yet.")
+def admin_dashboard():
+    st.subheader("🛡️ Admin Dashboard")
+    st.write("Here you can manage users and oversee platform activity.")
 
 # --- Main App ---
 def main():
-    st.title("🌍 Gamified Translation Learning Platform")
+    st.title("🌍 Adaptive Translation Gamified Platform")
+
+    # Initialize DB
+    init_db()
+
+    # Sidebar menu
+    menu = ["Login", "Register"]
+    choice = st.sidebar.selectbox("Menu", menu)
 
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
+        st.session_state.role = None
+        st.session_state.username = None
 
-    if not st.session_state.logged_in:
-        login_or_register()
-    else:
-        if st.session_state.role == "Instructor":
-            instructor_dashboard()
-        elif st.session_state.role == "Student":
+    # --- Login page ---
+    if choice == "Login":
+        st.subheader("Login Section")
+
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+
+        if st.button("Login"):
+            role = login_user(username, password)
+            if role:
+                st.session_state.logged_in = True
+                st.session_state.role = role
+                st.session_state.username = username
+                st.success(f"Welcome {username}! Logged in as {role}")
+                st.experimental_rerun()
+            else:
+                st.error("Invalid username or password")
+
+    # --- Registration page ---
+    elif choice == "Register":
+        st.subheader("Create a New Account")
+
+        new_user = st.text_input("Username")
+        new_password = st.text_input("Password", type="password")
+        role = st.selectbox("Role", ["student", "instructor", "admin"])
+
+        if st.button("Register"):
+            if register_user(new_user, new_password, role):
+                st.success("Account created successfully!")
+                st.info("Go to Login to access the platform")
+            else:
+                st.error("Username already exists")
+
+    # --- Dashboards after login ---
+    if st.session_state.logged_in:
+        if st.session_state.role == "student":
             student_dashboard()
+        elif st.session_state.role == "instructor":
+            instructor_dashboard()
+        elif st.session_state.role == "admin":
+            admin_dashboard()
+
+        # --- Logout button ---
+        if st.sidebar.button("Logout"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.experimental_rerun()
+
 
 if __name__ == "__main__":
     main()
