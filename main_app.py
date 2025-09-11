@@ -1,5 +1,13 @@
 import streamlit as st
 import sqlite3
+import hashlib
+
+# --- Helper: password hashing ---
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def verify_password(password, hashed):
+    return hash_password(password) == hashed
 
 # --- Database setup ---
 def init_db():
@@ -21,7 +29,7 @@ def register_user(username, password, role):
     c = conn.cursor()
     try:
         c.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", 
-                  (username, password, role))
+                  (username, hash_password(password), role))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -33,11 +41,11 @@ def register_user(username, password, role):
 def login_user(username, password):
     conn = sqlite3.connect("users.db")
     c = conn.cursor()
-    c.execute("SELECT role FROM users WHERE username=? AND password=?", (username, password))
+    c.execute("SELECT password, role FROM users WHERE username=?", (username,))
     result = c.fetchone()
     conn.close()
-    if result:
-        return result[0]
+    if result and verify_password(password, result[0]):
+        return result[1]   # return role
     return None
 
 # --- Dashboards ---
@@ -60,50 +68,16 @@ def main():
     # Initialize DB
     init_db()
 
-    # Sidebar menu
-    menu = ["Login", "Register"]
-    choice = st.sidebar.selectbox("Menu", menu)
-
+    # Ensure session state keys exist
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
         st.session_state.role = None
         st.session_state.username = None
 
-    # --- Login page ---
-    if choice == "Login":
-        st.subheader("Login Section")
-
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-
-        if st.button("Login"):
-            role = login_user(username, password)
-            if role:
-                st.session_state.logged_in = True
-                st.session_state.role = role
-                st.session_state.username = username
-                st.success(f"Welcome {username}! Logged in as {role}")
-                st.experimental_rerun()
-            else:
-                st.error("Invalid username or password")
-
-    # --- Registration page ---
-    elif choice == "Register":
-        st.subheader("Create a New Account")
-
-        new_user = st.text_input("Username")
-        new_password = st.text_input("Password", type="password")
-        role = st.selectbox("Role", ["student", "instructor", "admin"])
-
-        if st.button("Register"):
-            if register_user(new_user, new_password, role):
-                st.success("Account created successfully!")
-                st.info("Go to Login to access the platform")
-            else:
-                st.error("Username already exists")
-
-    # --- Dashboards after login ---
+    # If logged in, show dashboard directly
     if st.session_state.logged_in:
+        st.sidebar.write(f"👋 Logged in as {st.session_state.username} ({st.session_state.role})")
+
         if st.session_state.role == "student":
             student_dashboard()
         elif st.session_state.role == "instructor":
@@ -111,11 +85,48 @@ def main():
         elif st.session_state.role == "admin":
             admin_dashboard()
 
-        # --- Logout button ---
+        # Logout button resets session
         if st.sidebar.button("Logout"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.experimental_rerun()
+            st.session_state.logged_in = False
+            st.session_state.role = None
+            st.session_state.username = None
+
+    else:
+        # Sidebar menu only when not logged in
+        menu = ["Login", "Register"]
+        choice = st.sidebar.selectbox("Menu", menu)
+
+        # --- Login page ---
+        if choice == "Login":
+            st.subheader("Login Section")
+
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+
+            if st.button("Login"):
+                role = login_user(username, password)
+                if role:
+                    st.session_state.logged_in = True
+                    st.session_state.role = role
+                    st.session_state.username = username
+                    st.success(f"Welcome {username}! Logged in as {role}")
+                else:
+                    st.error("Invalid username or password")
+
+        # --- Registration page ---
+        elif choice == "Register":
+            st.subheader("Create a New Account")
+
+            new_user = st.text_input("Username")
+            new_password = st.text_input("Password", type="password")
+            role = st.selectbox("Role", ["student", "instructor", "admin"])
+
+            if st.button("Register"):
+                if register_user(new_user, new_password, role):
+                    st.success("Account created successfully!")
+                    st.info("Go to Login to access the platform")
+                else:
+                    st.error("Username already exists")
 
 
 if __name__ == "__main__":
